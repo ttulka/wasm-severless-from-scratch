@@ -61,26 +61,20 @@ class Cache {
 }
 
 class Server {
-  constructor(host = HOST_DEFAULT, port = PORT_DEFAULT) {
+  constructor(controllers, host = HOST_DEFAULT, port = PORT_DEFAULT) {
+    this.controllers = controllers;
     this.host = host;
     this.port = port;
-    this.wasmExecutor = new WasmExecutor();
     this.server = http.createServer(async (req, res) => {
       const request = this._parseRequest(req);
-      console
-      switch (request.controller) {
-        case "exec":
-          const result = await this.wasmExecutor.executeModule(`./${request.action}.wasm`, request.params);
-          res.statusCode = 200;
-          res.end(`${result}\n`);
-          break;
-        case "register":
-          // TODO
-          break;
-        default:
-          res.statusCode = 400;
-          res.end(`wrong request ${controller}\n`);
-          break;
+      const controllerFn = this.controllers[request.controller];
+      if (controllerFn) {
+        const result = await controllerFn(request.action, request.params);
+        res.statusCode = 200;
+        res.end(`${result}`);
+      } else {
+        res.statusCode = 400;
+        res.end(`wrong request ${controller}\n`);
       }
     });
   }
@@ -97,5 +91,24 @@ class Server {
   }
 }
 
-const server = new Server();
-server.start();
+class Platform {
+  constructor() {
+    this.wasmExecutor = new WasmExecutor();
+    this.server = new Server({
+      "exec": this.exec.bind(this),
+      "register": this.register.bind(this)
+    });
+  }
+  start() {
+    this.server.start();
+  }
+  exec(module, params) {
+    return this.wasmExecutor.executeModule(`./${module}.wasm`, params);
+  }
+  register(module, attributes) {
+    // TODO
+  }
+}
+
+const platform = new Platform();
+platform.start();
