@@ -40,12 +40,10 @@ class Cache {
     let entry = this.map.get(key);
     if (!entry) {
       const value = await supplyFn(key);
-      entry = {
-        value,
-        timestamp: Date.now()
-      };
+      entry = { value };
       this.map.set(key, entry);
     }
+    entry.timestamp = Date.now();
     return entry.value;
   }
   _evict() {    
@@ -68,12 +66,11 @@ class Server {
     this.port = port;
     this.wasmExecutor = new WasmExecutor();
     this.server = http.createServer(async (req, res) => {
-      const [controller, action] = req.url.substring(1).split("/");
-      switch (controller) {
+      const request = this._parseRequest(req);
+      console
+      switch (request.controller) {
         case "exec":
-          const [module, _query] = action.split("?");
-          const params = _query.split(",");
-          const result = await this.wasmExecutor.executeModule(`./${module}.wasm`, params);
+          const result = await this.wasmExecutor.executeModule(`./${request.action}.wasm`, request.params);
           res.statusCode = 200;
           res.end(`${result}\n`);
           break;
@@ -93,7 +90,10 @@ class Server {
     });
   }
   _parseRequest({url}) {
-    
+    const [controller, path] = url.substring(1).split("/");
+    const [action, query] = path.split("?");
+    const params = query.split(",");
+    return { controller, action, params };
   }
 }
 
