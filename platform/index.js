@@ -65,27 +65,35 @@ class Server {
     this.controllers = controllers;
     this.host = host;
     this.port = port;
-    this.server = http.createServer(async (req, res) => {
-      const request = this._parseRequest(req);
-      const controllerFn = this.controllers[request.controller];
-      if (controllerFn) {
-        const result = await controllerFn(request.action, request.params);
-        res.statusCode = 200;
-        res.end(`${result}`);
-      } else {
-        res.statusCode = 400;
-        res.end(`wrong request ${controller}\n`);
-      }
-    });
+    this.server = http.createServer(this._processRequest.bind(this));
   }
   start() {
     this.server.listen(this.port, this.host, () => {
       console.info(`server is running on http://${this.host}:${this.port}`);
     });
   }
+  async _processRequest(req, res) {
+    const request = this._parseRequest(req);
+    const controllerFn = this.controllers[request.controller];
+    if (controllerFn) {
+      try {
+        const result = await controllerFn(request.action, request.params);
+        res.statusCode = 200;
+        res.end(`${result}`);
+      } catch (err) {
+        console.error(err);
+        res.statusCode = 500;
+        res.end(err.toString());
+      }
+    } else {
+      res.statusCode = 400;
+      res.end(`wrong request ${request.controller}\n`);
+    }
+  }
   _parseRequest({url}) {
+    console.log('parsing request', url);
     const [controller, path] = url.substring(1).split("/");
-    const [action, query] = path.split("?");
+    const [action, query] = path && path.indexOf("?") > 0 ? path.split("?") : [path, ""];
     const params = query.split(",");
     return { controller, action, params };
   }
@@ -94,6 +102,7 @@ class Server {
 class Platform {
   constructor() {
     this.wasmExecutor = new WasmExecutor();
+    this.registry = new Map();
     this.server = new Server({
       "exec": this.exec.bind(this),
       "register": this.register.bind(this)
@@ -102,11 +111,18 @@ class Platform {
   start() {
     this.server.start();
   }
-  exec(module, params) {
-    return this.wasmExecutor.executeModule(`./${module}.wasm`, params);
+  exec(moduleName, params) {
+    if (this.registry.has(moduleName))  {
+      const module = this.registry.get(moduleName);
+      return this.wasmExecutor.executeModule(module.wasmFile, params);
+    }
+    throw new Error(`cannot find module '${moduleName}'`);
   }
   register(module, attributes) {
-    // TODO
+    this.registry.set(module, {
+      wasmFile: `./${module}.wasm`
+    });
+    return `module '${module}' registered successfully`;
   }
 }
 
