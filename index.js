@@ -1,16 +1,11 @@
 const fs = require("fs");
 const http = require("http");
+const {Worker} = require("worker_threads");
 
 const HOST_DEFAULT = "localhost";
 const PORT_DEFAULT = 8000;
-const START_FUNCTION = "_start";
 const TTL_MS_DEFAULT = 1000;
-const MEMORY_PAGES = 1;
-const IMPORT_OBJECT = { 
-  platform: {
-    now: Date.now
-  }
-};
+const NUMBER_OF_WORKERS = 2;
 
 class Cache {
   constructor(ttl = TTL_MS_DEFAULT) {
@@ -37,23 +32,51 @@ class Cache {
   };
 }
 
+class WorkerPool {
+  constructor(numberOfWorkers = NUMBER_OF_WORKERS) {
+    this.total = numberOfWorkers;
+    this.busy = 0;
+    this.tasks = [];
+  }
+  async execute(wasmBuffer, params) {
+    const exec = {wasmBuffer, params};
+    const promise = new Promise((resolve, reject) => this.tasks.push({exec, resolve, reject}));
+    this._work();
+    return promise;
+  }
+  async _work() {
+    console.debug(`attempt to execute in worker, busy workers: ${this.busy}`);
+    if (this.tasks.length && this.busy < this.total) {
+      this.busy++;
+      const onFinish = () => {
+        this.busy--;
+        console.debug(`worker finished, busy workers: ${this.busy}`);
+        this._work();
+      };
+      const task = this.tasks.pop();
+      const worker = new Worker("./worker.js", {
+        workerData: task.exec
+      });
+      worker.on("message", task.resolve);
+      worker.on("error", task.reject);
+      worker.on("exit", code => {
+        console.debug(`worker exited with code ${code}`);
+        if (code !== 0) task.reject();
+        onFinish();
+      });
+    }
+  }
+}
+
 class WasmExecutor {
   constructor() {
     this.modules = new Cache();
+    this.workers = new WorkerPool();
   }
   async executeModule(wasmFile, params) {
     console.debug("executing wasm module", wasmFile, params);
     const wasmBuffer = await this.modules.get(wasmFile, this._loadWasmBuffer);
-    const module = await this._instantiateModule(wasmBuffer);
-    return module(...params);
-  }
-  async _instantiateModule(wasmBuffer) {
-    const memory = new WebAssembly.Memory({initial: MEMORY_PAGES});
-    const {instance: {exports: wasm}} = await WebAssembly.instantiate(
-      wasmBuffer, 
-      {...IMPORT_OBJECT, platform: { memory }}
-    );
-    return wasm[START_FUNCTION];
+    return this.workers.execute(wasmBuffer, params);
   }
   _loadWasmBuffer(wasmFile) {
     console.debug("loading wasm buffer from file", wasmFile);
