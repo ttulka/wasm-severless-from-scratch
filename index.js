@@ -11,24 +11,6 @@ const IMPORT_OBJECT = {
   }
 };
 
-class WasmExecutor {
-  constructor() {
-    this.modules = new Cache();
-  }
-  async executeModule(wasmFile, params) {
-    console.debug("executing wasm module", wasmFile, params);
-    const module = await this.modules.get(wasmFile, this._loadModule);
-    return module(...params);
-  }
-  async _loadModule(wasmFile) {
-    console.debug("loading wasm from file", wasmFile);
-    const {instance: {exports: wasm}} = await WebAssembly.instantiate(
-      fs.readFileSync(wasmFile), IMPORT_OBJECT
-    );
-    return wasm[START_FUNCTION];
-  }
-}
-
 class Cache {
   constructor(ttl = TTL_MS_DEFAULT) {
     this.ttl = ttl;
@@ -46,18 +28,31 @@ class Cache {
     entry.timestamp = Date.now();
     return entry.value;
   }
-  _evict() {    
-    const toEvict = [];
+  _evict() {
     const timeout = Date.now() - this.ttl;
-    for (let [key, {timestamp}] of this.map.entries()) {
-      if (timestamp < timeout) {
-        toEvict.push(key);
-      }
-    }
-    toEvict.forEach(key => {
-      this.map.delete(key)
-    });
+    Array.from(this.map.entries())
+      .filter(([key, {timestamp}]) => timestamp < timeout)
+      .forEach(([key]) => this.map.delete(key));
   };
+}
+
+class WasmExecutor {
+  constructor() {
+    this.modules = new Cache();
+  }
+  async executeModule(wasmFile, params) {
+    console.debug("executing wasm module", wasmFile, params);
+    const module = await this.modules.get(wasmFile, this._loadModule);
+    return module(...params);
+  }
+  async _loadModule(wasmFile) {
+    console.debug("loading wasm from file", wasmFile);
+    const {instance: {exports: wasm}} = await WebAssembly.instantiate(
+      fs.readFileSync(wasmFile), 
+      IMPORT_OBJECT
+    );
+    return wasm[START_FUNCTION];
+  }
 }
 
 class Server {
