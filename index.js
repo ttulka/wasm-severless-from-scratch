@@ -106,24 +106,40 @@ class Platform {
     this.registry = new Map();
     this.server = new Server({
       "exec": this.exec.bind(this),
-      "register": this.register.bind(this)
+      "register": this.register.bind(this),
+      "stats": this.stats.bind(this),
     });
   }
   start() {
     this.server.start();
   }
   exec(moduleName, params) {
-    if (this.registry.has(moduleName))  {
-      const module = this.registry.get(moduleName);
-      return this.wasmExecutor.executeModule(module.wasmFile, params);
+    if (!this.registry.has(moduleName))  {
+      throw new Error(`cannot find module '${moduleName}'`);
     }
-    throw new Error(`cannot find module '${moduleName}'`);
+    const module = this.registry.get(moduleName);
+    const [, start] = process.hrtime();
+    const result = this.wasmExecutor.executeModule(module.wasmFile, params);
+    const [, end] = process.hrtime();
+    module.stats.time += end - start;
+    return result;
   }
-  register(module, attributes) {
-    this.registry.set(module, {
-      wasmFile: `./${module}.wasm`
+  register(moduleName, attributes) {
+    this.registry.set(moduleName, {
+      name: moduleName,
+      wasmFile: `./${moduleName}.wasm`,
+      stats: {
+        time: 0
+      }
     });
-    return `module '${module}' registered successfully`;
+    return `module '${moduleName}' registered successfully`;
+  }
+  stats(moduleName) {
+    if (!this.registry.has(moduleName))  {
+      throw new Error(`cannot find module '${moduleName}'`);
+    }
+    const module = this.registry.get(moduleName);
+    return `time: ${module.stats.time}`;
   }
 }
 
