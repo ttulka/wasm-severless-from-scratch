@@ -42,16 +42,21 @@ class WasmExecutor {
   }
   async executeModule(wasmFile, params) {
     console.debug("executing wasm module", wasmFile, params);
-    const module = await this.modules.get(wasmFile, this._loadModule);
+    const wasmBuffer = await this.modules.get(wasmFile, this._loadWasmBuffer);
+    const module = await this._instantiateModule(wasmBuffer);
     return module(...params);
   }
-  async _loadModule(wasmFile) {
-    console.debug("loading wasm from file", wasmFile);
+  async _instantiateModule(wasmBuffer) {
+    const memory = new WebAssembly.Memory({initial:1});
     const {instance: {exports: wasm}} = await WebAssembly.instantiate(
-      fs.readFileSync(wasmFile), 
-      IMPORT_OBJECT
+      wasmBuffer, 
+      {...IMPORT_OBJECT, platform: { memory }}
     );
     return wasm[START_FUNCTION];
+  }
+  _loadWasmBuffer(wasmFile) {
+    console.debug("loading wasm buffer from file", wasmFile);
+    return fs.readFileSync(wasmFile);
   }
 }
 
