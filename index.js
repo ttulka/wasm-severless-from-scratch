@@ -5,6 +5,7 @@ const HOST_DEFAULT = "localhost";
 const PORT_DEFAULT = 8000;
 const START_FUNCTION = "_start";
 const TTL_MS_DEFAULT = 1000;
+const MEMORY_PAGES = 1;
 const IMPORT_OBJECT = { 
   platform: {
     now: Date.now
@@ -47,7 +48,7 @@ class WasmExecutor {
     return module(...params);
   }
   async _instantiateModule(wasmBuffer) {
-    const memory = new WebAssembly.Memory({initial:1});
+    const memory = new WebAssembly.Memory({initial: MEMORY_PAGES});
     const {instance: {exports: wasm}} = await WebAssembly.instantiate(
       wasmBuffer, 
       {...IMPORT_OBJECT, platform: { memory }}
