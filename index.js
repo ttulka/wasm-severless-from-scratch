@@ -32,58 +32,6 @@ class Cache {
   };
 }
 
-class WorkerPool {
-  constructor(numberOfWorkers = NUMBER_OF_WORKERS) {
-    this.total = numberOfWorkers;
-    this.busy = 0;
-    this.tasks = [];
-  }
-  async execute(wasmBuffer, params) {
-    const exec = {wasmBuffer, params};
-    const promise = new Promise((resolve, reject) => this.tasks.push({exec, resolve, reject}));
-    this._work();
-    return promise;
-  }
-  async _work() {
-    console.debug(`attempt to execute in worker, busy workers: ${this.busy}`);
-    if (this.tasks.length && this.busy < this.total) {
-      this.busy++;
-      const onFinish = () => {
-        this.busy--;
-        console.debug(`worker finished, busy workers: ${this.busy}`);
-        this._work();
-      };
-      const task = this.tasks.pop();
-      const worker = new Worker("./worker.js", {
-        workerData: task.exec
-      });
-      worker.on("message", task.resolve);
-      worker.on("error", task.reject);
-      worker.on("exit", code => {
-        console.debug(`worker exited with code ${code}`);
-        if (code !== 0) task.reject();
-        onFinish();
-      });
-    }
-  }
-}
-
-class WasmExecutor {
-  constructor() {
-    this.modules = new Cache();
-    this.workers = new WorkerPool();
-  }
-  async executeModule(wasmFile, params) {
-    console.debug("executing wasm module", wasmFile, params);
-    const wasmBuffer = await this.modules.get(wasmFile, this._loadWasmBuffer);
-    return this.workers.execute(wasmBuffer, params);
-  }
-  _loadWasmBuffer(wasmFile) {
-    console.debug("loading wasm buffer from file", wasmFile);
-    return fs.readFileSync(wasmFile);
-  }
-}
-
 class HttpServer {
   constructor(controllers, host = HOST_DEFAULT, port = PORT_DEFAULT) {
     this.controllers = controllers;
@@ -123,9 +71,63 @@ class HttpServer {
   }
 }
 
+class WasmThreadExecutor {
+  constructor(numberOfWorkers = NUMBER_OF_WORKERS) {
+    this.total = numberOfWorkers;
+    this.busy = 0;
+    this.tasks = [];
+    this.modules = new Cache();
+  }
+  async execute(wasmFile, params, onFinish) {
+    console.debug("executing wasm module", wasmFile, params);
+    const wasmBuffer = await this.modules.get(wasmFile, this._loadWasmBuffer);
+    const exec = {wasmBuffer, params};
+    const promise = new Promise((_resolve, _reject) => {
+      const resolve = result => {
+        _resolve(result);
+        onFinish();
+      };
+      const reject = error => {
+        _reject(error);
+        onFinish();
+      };
+      this.tasks.push({exec, resolve, reject});
+    });
+    this._work();
+    return promise;
+  }
+  async _loadWasmBuffer(wasmFile) {
+    console.debug("loading wasm buffer from file", wasmFile);
+    return fs.readFileSync(wasmFile);
+  }
+  async _work() {
+    console.debug(`attempt to execute in worker, busy workers: ${this.busy}`);
+    if (!this.tasks.length || this.busy >= this.total) {
+      return;
+    }
+    this.busy++;
+    const onFinish = () => {
+      this.busy--;
+      console.debug(`worker finished, busy workers: ${this.busy}`);
+      this._work();
+    };
+    const task = this.tasks.pop();
+    const worker = new Worker("./worker.js", {
+      workerData: task.exec
+    });
+    worker.on("message", task.resolve);
+    worker.on("error", task.reject);
+    worker.on("exit", code => {
+      console.debug(`worker exited with code ${code}`);
+      if (code !== 0) task.reject();
+      onFinish();
+    });
+  }
+}
+
 class Platform {
   constructor() {
-    this.wasmExecutor = new WasmExecutor();
+    this.wasmExecutor = new WasmThreadExecutor();
     this.registry = new Map();
     this.server = new HttpServer({
       "exec": this.exec.bind(this),
@@ -141,10 +143,11 @@ class Platform {
       throw new Error(`cannot find module '${moduleName}'`);
     }
     const module = this.registry.get(moduleName);
-    const [, start] = process.hrtime();
-    const result = this.wasmExecutor.executeModule(module.wasmFile, params);
-    const [, end] = process.hrtime();
-    module.stats.time += end - start;
+    const start = Date.now();
+    const result = this.wasmExecutor.execute(module.wasmFile, params, () => {
+      const end = Date.now();
+      module.stats.time += end - start;
+    });
     return result;
   }
   register(moduleName, attributes) {
