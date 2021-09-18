@@ -165,7 +165,7 @@ class Platform {
       throw new Error(`cannot find module '${moduleName}'`);
     }
     const module = this.registry.get(moduleName);
-    return `time: ${module.stats.time}`;
+    return `execution time: ${module.stats.time}ms`;
   }
 }
 

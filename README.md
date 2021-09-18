@@ -18,13 +18,17 @@ server is running on http://localhost:8000
 ## Use
 
 ```sh
-# register a wasm module
+# register a wasm module:
 $ curl http://localhost:8000/register/sum
 module 'sum' registered successfully
 
-# execute a registered wasm module
+# execute a registered wasm module:
 $ curl http://localhost:8000/exec/sum?5,2
 7
+
+# computation stats:
+$ curl http://localhost:8000/stats/sum
+execution time: 37ms
 ```
 
 ## License
