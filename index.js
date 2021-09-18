@@ -61,7 +61,7 @@ class WasmExecutor {
   }
 }
 
-class Server {
+class HttpServer {
   constructor(controllers, host = HOST_DEFAULT, port = PORT_DEFAULT) {
     this.controllers = controllers;
     this.host = host;
@@ -104,7 +104,7 @@ class Platform {
   constructor() {
     this.wasmExecutor = new WasmExecutor();
     this.registry = new Map();
-    this.server = new Server({
+    this.server = new HttpServer({
       "exec": this.exec.bind(this),
       "register": this.register.bind(this),
       "stats": this.stats.bind(this),
