@@ -115,8 +115,10 @@ class WasmThreadExecutor {
     // start execution on a worker
     const time_start = Date.now();
     this.busy++;
+    let running = true;
     const onFinish = () => {
       this.busy--;
+      running = false;
       console.debug(`worker finished, busy workers: ${this.busy}`);
       this._work(); // trigger task polling when this worker finished
     };
@@ -136,8 +138,10 @@ class WasmThreadExecutor {
     });
     // kill the worker when timeout is reached
     setTimeout(() => {
-      console.warn("timout reached; killing worker");
-      worker.terminate();
+      if (running) {
+        console.warn("timout reached; killing worker");
+        worker.terminate();
+      }
     }, EXECUTION_TIMEOUT_MS);
   }
 }
