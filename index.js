@@ -83,13 +83,13 @@ class WasmThreadExecutor {
     const wasmBuffer = await this.modules.get(wasmFile, this._loadWasmBuffer);
     const exec = {wasmBuffer, params};
     const promise = new Promise((_resolve, _reject) => {
-      const resolve = result => {
+      const resolve = (result, stats) => {
         _resolve(result);
-        onFinish();
+        onFinish(stats);
       };
-      const reject = error => {
+      const reject = (error, stats) => {
         _reject(error);
-        onFinish();
+        onFinish(stats);
       };
       this.tasks.push({exec, resolve, reject});
     });
@@ -105,21 +105,23 @@ class WasmThreadExecutor {
     if (!this.tasks.length || this.busy >= this.total) {
       return;
     }
+    const time_start = Date.now();
     this.busy++;
     const onFinish = () => {
       this.busy--;
       console.debug(`worker finished, busy workers: ${this.busy}`);
       this._work();
     };
+    const createStats = () => ({time: Date.now() - time_start});
     const task = this.tasks.pop();
     const worker = new Worker("./worker.js", {
       workerData: task.exec
     });
-    worker.on("message", task.resolve);
-    worker.on("error", task.reject);
+    worker.on("message", result => task.resolve(result, createStats()));
+    worker.on("error", error => task.reject(error, createStats()));
     worker.on("exit", code => {
       console.debug(`worker exited with code ${code}`);
-      if (code !== 0) task.reject();
+      if (code !== 0) task.reject(`Exit code ${code}`, createStats());
       onFinish();
     });
   }
@@ -143,11 +145,7 @@ class Platform {
       throw new Error(`cannot find module '${moduleName}'`);
     }
     const module = this.registry.get(moduleName);
-    const start = Date.now();
-    const result = this.wasmExecutor.execute(module.wasmFile, params, () => {
-      const end = Date.now();
-      module.stats.time += end - start;
-    });
+    const result = this.wasmExecutor.execute(module.wasmFile, params, ({time}) => module.stats.time += time);
     return result;
   }
   register(moduleName, attributes) {
