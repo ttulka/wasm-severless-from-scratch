@@ -2,13 +2,14 @@ const fs = require("fs");
 const http = require("http");
 const {Worker} = require("worker_threads");
 
-const HOST_DEFAULT = "localhost";
-const PORT_DEFAULT = 8000;
-const TTL_MS_DEFAULT = 1000;
+const HOST = "localhost";
+const PORT = 8000;
+const CACHE_TTL_MS = 1000;
 const NUMBER_OF_WORKERS = 2;
+const EXECUTION_TIMEOUT_MS = 5000;
 
 class Cache {
-  constructor(ttl = TTL_MS_DEFAULT) {
+  constructor(ttl = CACHE_TTL_MS) {
     this.ttl = ttl;
     this.map = new Map();
     const evictFn = this._evict.bind(this);
@@ -33,7 +34,7 @@ class Cache {
 }
 
 class HttpServer {
-  constructor(controllers, host = HOST_DEFAULT, port = PORT_DEFAULT) {
+  constructor(controllers, host = HOST, port = PORT) {
     this.controllers = controllers;
     this.host = host;
     this.port = port;
@@ -77,6 +78,8 @@ class WasmThreadExecutor {
     this.busy = 0;
     this.tasks = [];
     this.modules = new Cache();
+
+    this._work = this._work.bind(this);
   }
   async execute(wasmFile, params, onFinish) {
     console.debug("executing wasm module", wasmFile, params);
@@ -124,6 +127,10 @@ class WasmThreadExecutor {
       if (code !== 0) task.reject(`Exit code ${code}`, createStats());
       onFinish();
     });
+    setTimeout(() => {
+      console.warn("timout reached; killing worker");
+      worker.terminate();
+    }, EXECUTION_TIMEOUT_MS);
   }
 }
 

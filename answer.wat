@@ -1,4 +1,3 @@
-;; answer.wat
 (module
   (import "platform" "memory" (memory 1))
   (func (export "_start") 

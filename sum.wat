@@ -1,4 +1,3 @@
-;; sum.wat
 (module
   (func (export "_start") 
         (param $a i32)
