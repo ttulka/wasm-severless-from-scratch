@@ -81,29 +81,26 @@ class WasmThreadExecutor {
     this.poolSize = poolSize; // max count of workers
     this.busy = 0;    // currently busy workers
     this.tasks = [];  // executions are queued as tasks
-    this.modules = new Cache(); // modules are cached to optimize against cold starts
+    this.cache = new Cache(); // modules are cached to optimize against cold starts
   }
-  async execute(wasmFile, params, onFinish) {
-    console.debug("executing wasm module", wasmFile, params);
-    const wasmBuffer = await this.modules.get(wasmFile, this._loadWasmBuffer);
-    const exec = {wasmBuffer, params};
+  execute(wasmFile, params, onFinish) {
+    console.debug("executing wasm module", wasmFile, params);    
+    // promise of execution will be fulfilled by a worker
     const promise = new Promise((_resolve, _reject) => {
+      // wrappers for the promise of execution
       const resolve = (result, stats) => {
-        _resolve(result);
-        onFinish(stats);
+        _resolve(result); // resolve the promise
+        onFinish(stats);  // callback hook of the platform
       };
       const reject = (error, stats) => {
-        _reject(error);
-        onFinish(stats);
+        _reject(error);   // reject the promise
+        onFinish(stats);  // callback hook of the platform
       };
-      this.tasks.push({exec, resolve, reject}); // defer execution when there is a free worker
+      // push the promise as a new task for workers
+      this.tasks.push({wasmFile, params, resolve, reject}); // defers execution for a free worker
     });
     this._work();   // trigger task polling
     return promise; // return a promise of a future execution
-  }
-  async _loadWasmBuffer(wasmFile) {
-    console.debug("loading wasm buffer from file", wasmFile);
-    return fs.readFileSync(wasmFile);
   }
   // polls a task from the queue and executes on a free worker
   async _work() {
@@ -125,9 +122,11 @@ class WasmThreadExecutor {
     const createStats = () => ({time: Date.now() - time_start});  // collect execution time
     // pop another task from the queue
     const task = this.tasks.pop();
+    // get a module from the cache or load it
+    const wasmBuffer = await this.cache.get(task.wasmFile, this._loadWasmBuffer);
     // create a new worker instance
     const worker = new Worker("./worker.js", {
-      workerData: task.exec
+      workerData: {wasmBuffer, params: task.params}
     });
     worker.on("message", result => task.resolve(result, createStats()));
     worker.on("error", error => task.reject(error, createStats()));
@@ -143,6 +142,10 @@ class WasmThreadExecutor {
         worker.terminate();
       }
     }, EXECUTION_TIMEOUT_MS);
+  }
+  async _loadWasmBuffer(wasmFile) {
+    console.debug("loading wasm buffer from file", wasmFile);
+    return fs.readFileSync(wasmFile);
   }
 }
 
