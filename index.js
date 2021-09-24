@@ -5,7 +5,7 @@ const {Worker} = require("worker_threads");
 const HOST = "localhost";
 const PORT = 8000;
 const CACHE_TTL_MS = 1000;
-const WORKER_POOL_SIZE = 2;
+const WORKER_POOL_SIZE = 5;
 const EXECUTION_TIMEOUT_MS = 5000;
 
 // general key-value cache with eviction after TTL
@@ -78,10 +78,10 @@ class HttpServer {
 // excutes Wasm module in a worker pool
 class WasmThreadExecutor {
   constructor(poolSize = WORKER_POOL_SIZE) {
-    this.poolSize = poolSize; // max count of workers
-    this.busy = 0;    // currently busy workers
+    this.threads = Array(poolSize); // pool of workers
     this.tasks = [];  // executions are queued as tasks
     this.cache = new Cache(); // modules are cached to optimize against cold starts
+    // setInterval(this._work.bind(this), 1000);  // periodically trigger to avoid lock-ins
   }
   execute(wasmFile, params, onFinish) {
     console.debug("executing wasm module", wasmFile, params);    
@@ -104,44 +104,90 @@ class WasmThreadExecutor {
   }
   // polls a task from the queue and executes on a free worker
   async _work() {
-    console.debug(`attempt to execute in worker, busy workers: ${this.busy}`);
+    // are there task to execute?
+    // pop another task from the queue
+    const task = this.tasks.pop();
+    if (!task) return;
     // are there free workers?
-    if (!this.tasks.length || this.busy >= this.poolSize) {
-      return;
-    }
+    const thread = await this._findFreeWorker();
+    if (!thread) return;
     // start execution on a worker
     const time_start = Date.now();
-    this.busy++;
+    thread.busy = true;
     let running = true;
-    const onFinish = () => {
-      this.busy--;
+    // execution finished callback
+    const onFinish = fn => {
+      thread.busy = false;
       running = false;
-      console.debug(`worker finished, busy workers: ${this.busy}`);
+      console.debug(`worker finished, busy workers: ${this._countOfBusyWorkers()}`);
+      if (fn) fn(); // execute the callback
       this._work(); // trigger task polling when this worker finished
     };
     const createStats = () => ({time: Date.now() - time_start});  // collect execution time
-    // pop another task from the queue
-    const task = this.tasks.pop();
-    // get a module from the cache or load it
-    const wasmBuffer = await this.cache.get(task.wasmFile, this._loadWasmBuffer);
-    // create a new worker instance
-    const worker = new Worker("./worker.js", {
-      workerData: {wasmBuffer, params: task.params}
-    });
-    worker.on("message", result => task.resolve(result, createStats()));
-    worker.on("error", error => task.reject(error, createStats()));
-    worker.on("exit", code => {
+    // setup the worker     
+    thread.onMessage = result => onFinish(() => task.resolve(result, createStats()));
+    thread.onError = error => onFinish(() => task.reject(error, createStats()));
+    thread.onExit = code => {
       console.debug(`worker exited with code ${code}`);
       if (code !== 0) task.reject(`Exit code ${code}`, createStats());
       onFinish();
-    });
+    };
+    // get a module from the cache or load it
+    const wasmBuffer = await this.cache.get(task.wasmFile, this._loadWasmBuffer);
+    // run on the worker
+    thread.worker.postMessage({wasmBuffer, params: task.params});
     // kill the worker when timeout is reached
     setTimeout(() => {
       if (running) {
-        console.warn("timout reached; killing worker");
-        worker.terminate();
+        console.warn("timeout reached; killing worker");
+        thread.worker.terminate();
+        this.threads[thread.index] = null;
       }
     }, EXECUTION_TIMEOUT_MS);
+  }
+  _findFreeWorker() {
+    return new Promise(resolve => {
+      let found = false;  // TODO do we need this?
+      for (let i = 0; !found && i < this.threads.length; i++) {
+        let w = this.threads[i];
+        if (!w) {
+          // create a new worker
+          found = true;
+          this._createWorker(i, resolve);
+        } else if (!w.busy) {
+          console.debug(`returning a free worker ${i}`);
+          found = true;
+          resolve(w);
+        }
+      }
+      if (!found) {
+        console.debug("all worker are busy");
+        resolve(null);
+      }
+    });
+  }
+  _createWorker(index, onUpAndRunning) {
+    console.debug(`creating a new worker ${index}`);
+    const worker = new Worker("./worker.js");
+    worker.on("online", () => {
+      console.debug(`worker ${index} is online`);
+      const thread = {
+        worker, 
+        index, 
+        busy: false, 
+        onMessage: result => {},
+        onError: error => {},
+        onExit: code => {}
+      };
+      worker.on("message", result => thread.onMessage(result));
+      worker.on("error", error => thread.onError(error));
+      worker.on("exit", code => thread.onExit(code));
+      this.threads[index] = thread;
+      onUpAndRunning(thread);
+    });
+  }
+  _countOfBusyWorkers() {
+    return this.threads.filter(t => t && t.busy).length;
   }
   async _loadWasmBuffer(wasmFile) {
     console.debug("loading wasm buffer from file", wasmFile);
@@ -164,6 +210,7 @@ class Platform {
     this.server.start();  // start the HTTP server
   }
   exec(moduleName, params) {
+    console.debug(`executing the module '${moduleName}' with parameters`, params);
     if (!this.registry.has(moduleName))  {  // execute only already registered modules
       throw new Error(`cannot find module '${moduleName}'`);
     }
@@ -173,6 +220,7 @@ class Platform {
       module.wasmFile, params, ({time}) => module.stats.time += time);
   }
   register(moduleName, attributes) {
+    console.debug(`registering the module '${moduleName}' with attributes`, attributes);
     this.registry.set(moduleName, {
       name: moduleName,
       wasmFile: `./${moduleName}.wasm`, // search for modules by name in the root directory
@@ -183,6 +231,7 @@ class Platform {
     return `module '${moduleName}' registered successfully`;
   }
   stats(moduleName) {
+    console.debug(`printing statistics for the module '${moduleName}'`);
     if (!this.registry.has(moduleName))  {
       throw new Error(`cannot find module '${moduleName}'`);
     }
