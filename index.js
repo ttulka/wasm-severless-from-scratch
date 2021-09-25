@@ -2,11 +2,11 @@ const fs = require("fs");
 const http = require("http");
 const {Worker} = require("worker_threads");
 
-const HOST = "localhost";
-const PORT = 8000;
-const CACHE_TTL_MS = 1000;
-const WORKER_POOL_SIZE = 5;
-const EXECUTION_TIMEOUT_MS = 5000;
+const HOST = process.env.HOST || "localhost";
+const PORT = +process.env.PORT || 8000;
+const CACHE_TTL_MS = +process.env.CACHE_TTL_MS || 1000;
+const WORKER_POOL_SIZE = +process.env.WORKER_POOL_SIZE || 2;
+const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 5000;
 
 // general key-value cache with eviction after TTL
 class Cache {
@@ -105,21 +105,22 @@ class WasmThreadExecutor {
   // polls a task from the queue and executes on a free worker
   async _work() {
     // are there task to execute?
-    // pop another task from the queue
-    const task = this.tasks.pop();
-    if (!task) return;
+    if (!this.tasks.length) return;
     // are there free workers?
     const thread = await this._findFreeWorker();
     if (!thread) return;
+    // pop another task from the queue
+    const task = this.tasks.pop();
     // start execution on a worker
     const time_start = Date.now();
     thread.busy = true;
     let running = true;
+    let timeout = false;
     // execution finished callback
     const onFinish = fn => {
       thread.busy = false;
       running = false;
-      console.debug(`worker finished, busy workers: ${this._countOfBusyWorkers()}`);
+      console.debug(`worker finished, busy workers: ${this._countOfBusyWorkers()}, tasks: ${this.tasks.length}`);
       if (fn) fn(); // execute the callback
       this._work(); // trigger task polling when this worker finished
     };
@@ -129,7 +130,10 @@ class WasmThreadExecutor {
     thread.onError = error => onFinish(() => task.reject(error, createStats()));
     thread.onExit = code => {
       console.debug(`worker exited with code ${code}`);
-      if (code !== 0) task.reject(`Exit code ${code}`, createStats());
+      if (code !== 0) {
+        if (timeout) task.reject(`timeout ${EXECUTION_TIMEOUT_MS}ms`, createStats());
+        else task.reject(`exit code ${code}`, createStats());
+      }
       onFinish();
     };
     // get a module from the cache or load it
@@ -140,6 +144,7 @@ class WasmThreadExecutor {
     setTimeout(() => {
       if (running) {
         console.warn("timeout reached; killing worker");
+        timeout = true;
         thread.worker.terminate();
         this.threads[thread.index] = null;
       }
@@ -161,7 +166,7 @@ class WasmThreadExecutor {
         }
       }
       if (!found) {
-        console.debug("all worker are busy");
+        console.debug("all workers are busy");
         resolve(null);
       }
     });
@@ -216,8 +221,11 @@ class Platform {
     }
     const module = this.registry.get(moduleName);
     // return a promise of a future execution
-    return this.wasmExecutor.execute(
-      module.wasmFile, params, ({time}) => module.stats.time += time);
+    return this.wasmExecutor.execute(module.wasmFile, params, ({time}) => {
+        module.stats.time += time;
+        module.stats.counter++;
+      })
+      .catch(err => console.error(`error by executing the module '${moduleName}' with parameters`, params, err));
   }
   register(moduleName, attributes) {
     console.debug(`registering the module '${moduleName}' with attributes`, attributes);
@@ -225,7 +233,8 @@ class Platform {
       name: moduleName,
       wasmFile: `./${moduleName}.wasm`, // search for modules by name in the root directory
       stats: {
-        time: 0
+        time: 0,
+        counter: 0,
       }
     });
     return `module '${moduleName}' registered successfully`;
@@ -236,7 +245,8 @@ class Platform {
       throw new Error(`cannot find module '${moduleName}'`);
     }
     const module = this.registry.get(moduleName);
-    return `execution time: ${module.stats.time}ms`;  // print stats
+    // print stats
+    return `execution time: ${module.stats.time}ms\nnumber of requests: ${module.stats.counter}`;  
   }
 }
 

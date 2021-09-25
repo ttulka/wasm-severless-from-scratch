@@ -31,6 +31,18 @@ $ curl http://localhost:8000/stats/sum
 execution time: 37ms
 ```
 
+## Configuration
+
+| Env. variable        | Default     | Description |
+| -------------------- | ----------- | ----------- |
+| HOST                 | `localhost` | Host to listen on. |
+| PORT                 | `8000`      | Port to listen on. |
+| CACHE_TTL_MS         | `1000`      | Time-to-live in millis of loaded Wasm modules in cache. |
+| WORKER_POOL_SIZE     | `2`         | Capacity of the worker thread pool. |
+| EXECUTION_TIMEOUT_MS | `5000`      | Execution timeout in millis for Wasm functions. |
+| WASM_START_FUNCTION  | `_start`    | Wasm module function name to start. |
+| MEMORY_PAGES         | `1`         | Number of memory pages (64kB) for Wasm modules. |
+
 ## License
 
 [MIT](https://github.com/ttulka/wasm-severless-from-scratch/blob/main/LICENSE)

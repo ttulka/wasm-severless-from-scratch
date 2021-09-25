@@ -1,7 +1,7 @@
 const {parentPort} = require("worker_threads");
 
-const START_FUNCTION = "_start";
-const MEMORY_PAGES = 1;
+const START_FUNCTION = process.env.WASM_START_FUNCTION || "_start";
+const MEMORY_PAGES = +process.env.MEMORY_PAGES || 1;
 const IMPORT_PLATFORM = { 
   now: Date.now
 };
@@ -12,25 +12,28 @@ parentPort.on("message", exec);
 // execute the module and send a result message
 async function exec(data) {
   console.debug("execution in a worker has started")
-  execModule(data).then(res => parentPort.postMessage(res));
+  const result = await execModule(data);
+  parentPort.postMessage(result);
 }
 
 // execute the module
 async function execModule({wasmBuffer, params}) {
-  const {instance: {exports: wasm}} = await WebAssembly.instantiate(wasmBuffer, {
-    platform: {
-      ...IMPORT_PLATFORM, 
-      memory: new WebAssembly.Memory({initial: MEMORY_PAGES})
-    }});
   try {
+    const {instance: {exports: wasm}} = await WebAssembly.instantiate(wasmBuffer, {
+      platform: {
+        ...IMPORT_PLATFORM, 
+        memory: new WebAssembly.Memory({initial: MEMORY_PAGES})
+      }});
     return wasm[START_FUNCTION](...params);
+
   } catch (err) {
+    console.error("error while executing Wasm", err);
     return err;
   }
 }
 
 // keep the worker alive
-new Promise((resolve, reject) => parentPort.on("close", () => {
-  console.debug('CLOSE');
+new Promise(resolve => parentPort.on("close", () => {
+  console.debug("worker is closing");
   resolve()
 }));
