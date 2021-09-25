@@ -17,6 +17,10 @@ server is running on http://localhost:8000
 
 ## Use
 
+- `/register/<module>` - registers a module to the platform
+- `/exec/<module>[?param1[,param2[...]]]` - executes a registered module
+- `/stats/<module>` - module execution stats (consumed time, etc.)
+
 ```sh
 # register a wasm module:
 $ curl http://localhost:8000/register/sum
@@ -28,7 +32,8 @@ $ curl http://localhost:8000/exec/sum?5,2
 
 # computation stats:
 $ curl http://localhost:8000/stats/sum
-execution time: 37ms
+execution time: 6ms
+number of requests: 1
 ```
 
 ## Configuration
