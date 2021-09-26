@@ -114,11 +114,11 @@ class WasmThreadExecutor {
     // start execution on a worker
     const time_start = Date.now();
     thread.busy = true;
-    let timeout = false;
+    let timeoutReached = false;
     // kill the worker when timeout is reached
     const timeoutId = setTimeout(() => {
       console.warn("timeout reached; killing worker");
-      timeout = true;
+      timeoutReached = true;
       thread.worker.terminate();
       this.threads[thread.index] = null;
     }, EXECUTION_TIMEOUT_MS);
@@ -137,7 +137,7 @@ class WasmThreadExecutor {
     thread.onExit = code => {
       console.debug(`worker exited with code ${code}`);
       if (code !== 0) {
-        if (timeout) task.reject(`timeout after ${EXECUTION_TIMEOUT_MS}ms`, createStats());
+        if (timeoutReached) task.reject(`timeout after ${EXECUTION_TIMEOUT_MS}ms`, createStats());
         else task.reject(`exit code ${code}`, createStats());
       }
       onFinish();
