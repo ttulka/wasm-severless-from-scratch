@@ -6,7 +6,7 @@ const HOST = process.env.HOST || "localhost";
 const PORT = +process.env.PORT || 8000;
 const CACHE_TTL_MS = +process.env.CACHE_TTL_MS || 1000;
 const WORKER_POOL_SIZE = +process.env.WORKER_POOL_SIZE || 2;
-const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 5000;
+const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 1000;
 
 // key-value cache for SharedArrayBuffer values with eviction after TTL
 class SharedBufferCache {
@@ -112,10 +112,9 @@ class WasmThreadExecutor {
     // are there task to execute?
     if (!this.tasks.length) return;
     // are there free workers?
-    const thread = await this._findFreeWorker();
+    const thread = this._findFreeWorker();
     if (!thread) return;
     // pop another task from the queue
-    if (!this.tasks.length) return;
     const task = this.tasks.pop();
     // start execution on a worker
     const time_start = Date.now();
@@ -154,45 +153,36 @@ class WasmThreadExecutor {
     thread.worker.postMessage({wasmBuffer, params: task.params});
   }
   _findFreeWorker() {
-    return new Promise(resolve => {
-      let found = false;  // TODO do we need this?
-      for (let i = 0; !found && i < this.threads.length; i++) {
-        let w = this.threads[i];
-        if (!w) {
-          // create a new worker
-          found = true;
-          this._createWorker(i, resolve);
-        } else if (!w.busy) {
-          console.debug(`returning a free worker ${i}`);
-          found = true;
-          resolve(w);
-        }
+    for (let i = 0; i < this.threads.length; i++) {
+      const thread = this.threads[i];
+      if (!thread) {
+        // create a new worker
+        console.debug(`creating a new worker ${i}`);
+        this.threads[i] = this._createWorker(i);
+        return this.threads[i];
+      } 
+      if (!thread.busy) {
+        console.debug(`returning a free worker ${i}`);
+        return thread;
       }
-      if (!found) {
-        console.debug("all workers are busy");
-        resolve(null);
-      }
-    });
+    }
+    console.debug("all workers are busy");
+    return null;
   }
-  _createWorker(index, onUpAndRunning) {
-    console.debug(`creating a new worker ${index}`);
+  _createWorker(index) {
     const worker = new Worker("./worker.js");
-    worker.on("online", () => {
-      console.debug(`worker ${index} is online`);
-      const thread = {
-        worker, 
-        index, 
-        busy: false, 
-        onMessage: result => {},
-        onError: error => {},
-        onExit: code => {}
-      };
-      worker.on("message", result => thread.onMessage(result));
-      worker.on("error", error => thread.onError(error));
-      worker.on("exit", code => thread.onExit(code));
-      this.threads[index] = thread;
-      onUpAndRunning(thread);
-    });
+    const thread = {
+      worker, 
+      index, 
+      busy: false, 
+      onMessage: result => {},
+      onError: error => {},
+      onExit: code => {}
+    };
+    worker.on("message", result => thread.onMessage(result));
+    worker.on("error", error => thread.onError(error));
+    worker.on("exit", code => thread.onExit(code));
+    return thread;
   }
   _countOfBusyWorkers() {
     return this.threads.filter(t => t && t.busy).length;
