@@ -114,12 +114,18 @@ class WasmThreadExecutor {
     // start execution on a worker
     const time_start = Date.now();
     thread.busy = true;
-    let running = true;
     let timeout = false;
+    // kill the worker when timeout is reached
+    const timeoutId = setTimeout(() => {
+      console.warn("timeout reached; killing worker");
+      timeout = true;
+      thread.worker.terminate();
+      this.threads[thread.index] = null;
+    }, EXECUTION_TIMEOUT_MS);
     // execution finished callback
     const onFinish = fn => {
+      clearTimeout(timeoutId);
       thread.busy = false;
-      running = false;
       console.debug(`worker finished, busy workers: ${this._countOfBusyWorkers()}, tasks: ${this.tasks.length}`);
       if (fn) fn(); // execute the callback
       this._work(); // trigger task polling when this worker finished
@@ -131,7 +137,7 @@ class WasmThreadExecutor {
     thread.onExit = code => {
       console.debug(`worker exited with code ${code}`);
       if (code !== 0) {
-        if (timeout) task.reject(`timeout ${EXECUTION_TIMEOUT_MS}ms`, createStats());
+        if (timeout) task.reject(`timeout after ${EXECUTION_TIMEOUT_MS}ms`, createStats());
         else task.reject(`exit code ${code}`, createStats());
       }
       onFinish();
@@ -140,15 +146,6 @@ class WasmThreadExecutor {
     const wasmBuffer = await this.cache.get(task.wasmFile, this._loadWasmBuffer);
     // run on the worker
     thread.worker.postMessage({wasmBuffer, params: task.params});
-    // kill the worker when timeout is reached
-    setTimeout(() => {
-      if (running) {
-        console.warn("timeout reached; killing worker");
-        timeout = true;
-        thread.worker.terminate();
-        this.threads[thread.index] = null;
-      }
-    }, EXECUTION_TIMEOUT_MS);
   }
   _findFreeWorker() {
     return new Promise(resolve => {
