@@ -8,19 +8,24 @@ const CACHE_TTL_MS = +process.env.CACHE_TTL_MS || 1000;
 const WORKER_POOL_SIZE = +process.env.WORKER_POOL_SIZE || 2;
 const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 5000;
 
-// general key-value cache with eviction after TTL
-class Cache {
+// key-value cache for SharedArrayBuffer values with eviction after TTL
+class SharedBufferCache {
   constructor(ttl = CACHE_TTL_MS) {
     this.ttl = ttl;
     this.map = new Map();
     const evictFn = this._evict.bind(this);
     setInterval(evictFn, this.ttl);
   }
-  async get(key, supplyFn) {
+  async get(key, supplyBufferFn) {
     let entry = this.map.get(key);
     if (!entry) {
-      const value = await supplyFn(key);
-      entry = { value };
+      const data = await supplyBufferFn(key);
+      // wrap data into a shared buffer
+      const value = new SharedArrayBuffer(data.length);
+      const buffer = Buffer.from(value);
+      buffer.set(data);
+      // store into the cache
+      entry = {value};
       this.map.set(key, entry);
     }
     entry.timestamp = Date.now();
@@ -80,7 +85,7 @@ class WasmThreadExecutor {
   constructor(poolSize = WORKER_POOL_SIZE) {
     this.threads = Array(poolSize); // pool of workers
     this.tasks = [];  // executions are queued as tasks
-    this.cache = new Cache(); // modules are cached to optimize against cold starts
+    this.cache = new SharedBufferCache(); // modules are cached to optimize against cold starts
     // setInterval(this._work.bind(this), 1000);  // periodically trigger to avoid lock-ins
   }
   execute(wasmFile, params, onFinish) {
@@ -110,6 +115,7 @@ class WasmThreadExecutor {
     const thread = await this._findFreeWorker();
     if (!thread) return;
     // pop another task from the queue
+    if (!this.tasks.length) return;
     const task = this.tasks.pop();
     // start execution on a worker
     const time_start = Date.now();

@@ -19,7 +19,8 @@ async function exec(data) {
 // execute the module
 async function execModule({wasmBuffer, params}) {
   try {
-    const {instance: {exports: wasm}} = await WebAssembly.instantiate(wasmBuffer, {
+    const buff = new Uint8Array(wasmBuffer);  // array view on the shared buffer
+    const {instance: {exports: wasm}} = await WebAssembly.instantiate(buff, {
       platform: {
         ...IMPORT_PLATFORM, 
         memory: new WebAssembly.Memory({initial: MEMORY_PAGES})
@@ -31,9 +32,3 @@ async function execModule({wasmBuffer, params}) {
     return err;
   }
 }
-
-// keep the worker alive
-new Promise(resolve => parentPort.on("close", () => {
-  console.debug("worker is closing");
-  resolve()
-}));
