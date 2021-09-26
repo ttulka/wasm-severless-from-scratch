@@ -6,7 +6,7 @@ const HOST = process.env.HOST || "localhost";
 const PORT = +process.env.PORT || 8000;
 const CACHE_TTL_MS = +process.env.CACHE_TTL_MS || 1000;
 const WORKER_POOL_SIZE = +process.env.WORKER_POOL_SIZE || 2;
-const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 1000;
+const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 5000;
 
 // key-value cache for SharedArrayBuffer values with eviction after TTL
 class SharedBufferCache {
