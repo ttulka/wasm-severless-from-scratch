@@ -21,11 +21,11 @@ class SharedBufferCache {
     if (!entry) {
       const data = await supplyBufferFn(key);
       // wrap data into a shared buffer
-      const value = new SharedArrayBuffer(data.length);
-      const buffer = Buffer.from(value);
+      const sharedBuffer = new SharedArrayBuffer(data.length);
+      const buffer = Buffer.from(sharedBuffer);
       buffer.set(data);
       // store into the cache
-      entry = {value};
+      entry = {value: sharedBuffer};
       this.map.set(key, entry);
     }
     entry.timestamp = Date.now();
@@ -88,7 +88,7 @@ class WasmThreadExecutor {
     this.cache = new SharedBufferCache(); // modules are cached to optimize against cold starts
     // setInterval(this._work.bind(this), 1000);  // periodically trigger to avoid lock-ins
   }
-  execute(wasmFile, params, onFinish) {
+  async execute(wasmFile, params, onFinish) {
     console.debug("executing wasm module", wasmFile, params);    
     // promise of execution will be fulfilled by a worker
     const promise = new Promise((_resolve, _reject) => {
@@ -104,11 +104,11 @@ class WasmThreadExecutor {
       // push the promise as a new task for workers
       this.tasks.push({wasmFile, params, resolve, reject}); // defers execution for a free worker
     });
-    this._work();   // trigger task polling
+    this._triggerWork();   // trigger task polling
     return promise; // return a promise of a future execution
   }
-  // polls a task from the queue and executes on a free worker
-  async _work() {
+  // polls a task from the queue and attempts to execute on a free worker
+  async _triggerWork() {
     // are there task to execute?
     if (!this.tasks.length) return;
     // are there free workers?
@@ -116,41 +116,48 @@ class WasmThreadExecutor {
     if (!thread) return;
     // pop another task from the queue
     const task = this.tasks.pop();
-    // start execution on a worker
+    // start async execution on a worker
+    this._work(task, thread);
+  }
+  // executes a task on a worker thread
+  async _work(task, thread) {
     const time_start = Date.now();
     thread.busy = true;
-    let timeoutReached = false;
     // kill the worker when timeout is reached
-    const timeoutId = setTimeout(() => {
-      console.warn("timeout reached; killing worker");
-      timeoutReached = true;
-      thread.worker.terminate();
-      this.threads[thread.index] = null;
-    }, EXECUTION_TIMEOUT_MS);
+    let timeoutReached = false;
+    const timeoutId = this._setupWorkTimeout(thread, () => timeoutReached = true);
     // execution finished callback
-    const onFinish = fn => {
+    const onWokerFinished = callback => {
       clearTimeout(timeoutId);
       thread.busy = false;
       console.debug(`worker finished, busy workers: ${this._countOfBusyWorkers()}, tasks: ${this.tasks.length}`);
-      if (fn) fn(); // execute the callback
-      this._work(); // trigger task polling when this worker finished
+      if (callback) callback(); // execute the callback
+      this._triggerWork(); // trigger task polling when this worker finished
     };
     const createStats = () => ({time: Date.now() - time_start});  // collect execution time
     // setup the worker     
-    thread.onMessage = result => onFinish(() => task.resolve(result, createStats()));
-    thread.onError = error => onFinish(() => task.reject(error, createStats()));
+    thread.onMessage = result => onWokerFinished(() => task.resolve(result, createStats()));
+    thread.onError = error => onWokerFinished(() => task.reject(error, createStats()));
     thread.onExit = code => {
       console.debug(`worker exited with code ${code}`);
       if (code !== 0) {
         if (timeoutReached) task.reject(`timeout after ${EXECUTION_TIMEOUT_MS}ms`, createStats());
         else task.reject(`exit code ${code}`, createStats());
       }
-      onFinish();
+      onWokerFinished();
     };
     // get a module from the cache or load it
     const wasmBuffer = await this.cache.get(task.wasmFile, this._loadWasmBuffer);
     // run on the worker
     thread.worker.postMessage({wasmBuffer, params: task.params});
+  }
+  _setupWorkTimeout(thread, callback) {
+    return setTimeout(() => {
+      console.warn("timeout reached; killing worker");
+      thread.worker.terminate();
+      this.threads[thread.index] = null;  // remove the worker from the pool
+      if (callback) callback();
+    }, EXECUTION_TIMEOUT_MS);
   }
   _findFreeWorker() {
     for (let i = 0; i < this.threads.length; i++) {

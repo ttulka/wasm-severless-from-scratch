@@ -6,7 +6,7 @@ const IMPORT_PLATFORM = {
   now: Date.now
 };
 
-// a new task came
+// a new task comes
 parentPort.on("message", exec);
 
 // execute the module and send a result message
