@@ -2,8 +2,9 @@ const fs = require("fs");
 const http = require("http");
 const {Worker} = require("worker_threads");
 
-const HOST = process.env.HOST || "localhost";
+const HOST = process.env.HOST || "0.0.0.0";
 const PORT = +process.env.PORT || 8000;
+const PATH_TO_MODULES = process.env.PATH_TO_MODULES || "."
 const CACHE_TTL_MS = +process.env.CACHE_TTL_MS || 1000;
 const WORKER_POOL_SIZE = +process.env.WORKER_POOL_SIZE || 2;
 const EXECUTION_TIMEOUT_MS = +process.env.EXECUTION_TIMEOUT_MS || 5000;
@@ -229,9 +230,11 @@ class Platform {
   }
   register(moduleName, attributes) {
     console.debug(`registering the module '${moduleName}' with attributes`, attributes);
+    const wasmFile = `${PATH_TO_MODULES}/${moduleName}.wasm`;  // search for modules by name in the root directory
+    if (!fs.existsSync(wasmFile)) throw new Error(`module not found in '${wasmFile}'`);
     this.registry.set(moduleName, {
       name: moduleName,
-      wasmFile: `./${moduleName}.wasm`, // search for modules by name in the root directory
+      wasmFile,
       stats: {
         time: 0,
         counter: 0,

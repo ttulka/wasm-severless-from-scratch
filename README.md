@@ -12,9 +12,18 @@ $ wat2wasm sum.wat -o sum.wasm
 
 ## Run
 
+From source code:
+
 ```sh
 $ node index.js
-server is running on http://localhost:8000
+server is running on http://0.0.0.0:8000
+```
+
+As a Docker container:
+
+```sh
+$ docker run -p 8000:8000 -v $PWD:/app/wasm --rm ttulka/wasm-severless-from-scratch
+server is running on http://0.0.0.0:8000
 ```
 
 ## Use
@@ -40,15 +49,16 @@ number of requests: 1
 
 ## Configuration
 
-| Env. variable        | Default     | Description |
-| -------------------- | ----------- | ----------- |
-| HOST                 | `localhost` | Host to listen on. |
-| PORT                 | `8000`      | Port to listen on. |
-| CACHE_TTL_MS         | `1000`      | Time-to-live in millis of loaded Wasm modules in cache. |
-| WORKER_POOL_SIZE     | `2`         | Capacity of the worker thread pool. |
-| EXECUTION_TIMEOUT_MS | `5000`      | Execution timeout in millis for Wasm functions. |
-| WASM_START_FUNCTION  | `_start`    | Wasm module function name to start. |
-| MEMORY_PAGES         | `1`         | Number of memory pages (64kB) for Wasm modules. |
+| Env. variable          | Default     | Description |
+| ---------------------- | ----------- | ----------- |
+| `HOST`                 | `0.0.0.0`   | Host to listen on. |
+| `PORT`                 | `8000`      | Port to listen on. |
+| `PATH_TO_MODULES`      | `.`         | Path to Wasm files. |
+| `CACHE_TTL_MS`         | `1000`      | Time-to-live in millis of loaded Wasm modules in cache. |
+| `WORKER_POOL_SIZE`     | `2`         | Capacity of the worker thread pool. |
+| `EXECUTION_TIMEOUT_MS` | `5000`      | Execution timeout in millis for Wasm functions. |
+| `WASM_START_FUNCTION`  | `_start`    | Wasm module function name to start. |
+| `MEMORY_PAGES`         | `1`         | Number of memory pages (64kB) for Wasm modules. |
 
 ## License
 
