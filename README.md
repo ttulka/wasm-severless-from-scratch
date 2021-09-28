@@ -1,6 +1,8 @@
 # WebAssembly Serverless Computing Platform from Scratch
 
-A serverless computing platform in Node.js based on the concept of Wasm nanoprocesses.
+Proof of concept of a serverless compute platform in Node.js based on the idea of nanoprocesses.
+
+![WebAssembly Serverless Computing Platform Architecture](https://raw.githubusercontent.com/ttulka/blog-assets/master/wasm-serverless/wasm-serverless-4.png)
 
 ## Build
 
